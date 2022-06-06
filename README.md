@@ -1,2 +1,17 @@
 # RESTful-API
-The goal of this project is to develop a simple REST API application that is backed by a database such as MySQL. This involves client-server environment where clients request for resources from the server managed with HTTP. Initially, I am going to start with a book management system. Endpoints include books and the users. Users will be able to get, create, update, and delete books which will be managed by the server. In order to build a stable API, a concurrent strategy will be employed to handle large scale requests or updates using many of the built-in features in Golang. Postman or other HTTP client will be used to test the server. Once the server works, I will try to get it working locally in Docker.
+The goal of this project is to develop a simple REST API application that is backed by a database such as MySQL. This involves client-server environment where clients request for resources from the server managed with HTTP. The API server will include the following endpoints:
+- 'GET /users' : Provides the list of all the users that are logged-in
+- 'GET /users/me' : Allows users to access their information once they are logged in
+- 'PUT /users/update/me' : Updates user's info
+- 'GET /user/logout/me' : Logs the user out while also keeping the information in the database
+- 'DELETE /user/me' : Deletes the user 
+- 'POST /signup' : Allows users to sign up
+- 'POST /signin' : Authenticates the credentials and logs in
+- 'POST /createPost' : Creates a post
+- 'GET /listPost': Lists all posts posted by all users
+- 'GET /readPost/:id' : Get a single post with a specific id
+- 'GET /post/me' : Lists all posts belonging to the current user
+
+We are going to use JWT and auth middleware to handle all the authentication process of the users. 
+
+In order to build a stable API, a concurrent strategy will be employed to handle large scale requests or updates using many of the built-in features in Golang. Postman or other HTTP client will be used to test the server. Once the server works, we will try to get it working locally in Docker.
