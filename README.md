@@ -1,2 +1,6 @@
 # RESTful-API
+<<<<<<< HEAD
 The goal of this project is to develop a simple REST API application that is backed by a database such as MySQL which will provide out HTTP endpoints. This involves client-server environment where clients request for resources from the server managed with HTTP. In order to build a stable API, a concurrent strategy will be employed to handle large scale requests or updates using many of the built-in features in Golang. Postman or other HTTP client will be used to test the server. Once the server works, I will try to get it working locally in Docker.
+=======
+The goal of this project is to develop a simple REST API application that is backed by a database such as MySQL. This involves client-server environment where clients request for resources from the server managed with HTTP. Initially, I am going to start with a book management system. Endpoints include books and the users. Users will be able to get, create, update, and delete books which will be managed by the server. In order to build a stable API, a concurrent strategy will be employed to handle large scale requests or updates using many of the built-in features in Golang. Postman or other HTTP client will be used to test the server. Once the server works, I will try to get it working locally in Docker.
+>>>>>>> 95b3bd07a8146679c50b5db5d2bdbc01e9df5056
