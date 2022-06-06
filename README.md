@@ -17,14 +17,14 @@ We are going to use JWT and auth middleware to handle all the authentication pro
 In order to build a stable API, a concurrent strategy will be employed to handle large scale requests or updates using many of the built-in features in Golang. Postman or other HTTP client will be used to test the server. Once the server works, we will try to get it working locally in Docker.
 
 ## Approach ##
-1. Deploy the API server in a docker container without a database, with only the GET /users endpoint running. The endpoint will return fixed dummy data
+1. Deploy the API server in a docker container without a database, with only the 'GET /users' endpoint running. The endpoint will return fixed dummy data
 
-2. Add the database, add the POST /signup , the server can now create and show users
+2. Add the database, add the 'POST /signup' , the server can now create and show users
 
-3. Add authentication and the POST /signin endpoint
+3. Add authentication and the 'POST /signin' endpoint
 
 4. Add the rest of the user endpoints involving authentication
 
-5. Add all other endpoints including functionalities around posting
+5. Add all other endpoints including functionalities around 'post'
 
 
