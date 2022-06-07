@@ -1,4 +1,4 @@
-# RESTful API Project
+# RESTful API
 The goal of this project is to develop a simple REST API application that is backed by a database such as MySQL. This involves client-server environment where clients request for resources from the server managed with HTTP. The API server will include the following endpoints:
 - `GET /users` : Provides the list of all the users that are logged-in
 - `GET /users/me` : Allows users to access their information once they are logged in
