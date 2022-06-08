@@ -1,15 +1,15 @@
 # RESTful API
-The goal of this project is to develop a simple REST API application. This involves client-server environment where clients can send data to the server managed with HTTP. The API server will include the following endpoints:
+The goal of this project is to develop a simple REST API application. This involves client-server environment where clients can send data to the server managed with HTTP. Endpoint included in the API server is represented in the following table:
 
-- `POST /signup` : User can sign up
-- `POST /signin` : Users can sign in using correct credentials and returns a token that ensures authentication
-- `POST /logout` : User can logout and the token is deleted
-- 'GET /users : List all the users for debugging purposes
-- POST /data : Sends data to the server
-- GET /data : Retreives all the data send by a user
-- GET /debug: Returns a string "Kyutae's awesome"
-
-table: http verb, endpoint name, endpoint description, arguments, returns (what the endpoint sends back)
+| HTTP Verb | Endpoint Name | Endpoint Description | Arguments | Return Value |
+|     ---      |      ---       |      ---      | --- | --- |
+| POST  | /signup     | User can sign up    | None | Success/ Error|
+| POST  | /signin   |  Users can sign in using correct credentials and returns a token that ensures authentication   | User ID, Password| Authentication token|
+| POST  | /logout | User can logout and the token is deleted | None | Success/ Error message|
+| GET   | /users | List all the users for debugging purposes | None | List of users |
+| POST | /data | Sends data to the server | Data | Success/ Error message |
+| GET | /data | Retreives all the data sent by a user | User ID | Success/ Error message |
+| GET | /debug | Returns a string "Kyutae's awesome" | None | String |
 
 ## Approach ##
 1. Set up a server that can handle requests. Get it running locally. Start with the debug endpoint.
