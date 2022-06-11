@@ -24,7 +24,11 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(`{"message": "get called"}`))
 	case "POST":
-		u.signin(w, r)
+		if r.URL.Path == "/signup" {
+			u.signup(w, r)
+		} else if r.URL.Path == "/signin" {
+			u.signin(w, r)
+		}
 	case "PUT":
 		w.WriteHeader(http.StatusAccepted)
 		w.Write([]byte(`{"message": "put called"}`))
@@ -35,6 +39,21 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(`{"message": "Kyutae's Awesome"}`))
 	}
+}
+
+func (u *userHandler) signup(w http.ResponseWriter, r *http.Request) {
+	userID := ""
+	pw := ""
+	// json body in an http request send json request using postman
+	// receive it in the server maybe unmarshal it into a struct
+	// deserialize json in golang ("encoding/json")
+
+	u.store.Lock()
+	u.store.users[userID] = pw
+	u.store.Unlock()
+	r.SetBasicAuth(userID, pw)
+	r.Header.Add("Content-Type", "application/json")
+	r.Close = true
 }
 
 func (u *userHandler) isAuthorised(username, password string) bool {
@@ -76,7 +95,8 @@ func main() {
 			RWMutex: &sync.RWMutex{},
 		},
 	}
-	mux.Handle("/", userH)
+	mux.Handle("/signin", userH)
+	mux.Handle("/signup", userH)
 	log.Fatal(http.ListenAndServe(":8080", mux))
 
 }
