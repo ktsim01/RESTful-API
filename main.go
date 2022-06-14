@@ -1,15 +1,21 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"sync"
 )
 
+type user struct {
+	UserID   string `json:"id"`
+	Password string `json:"pw"`
+}
+
 // in-memory
 type datastore struct {
-	users         map[string]string
+	users         map[string]user
 	*sync.RWMutex //concurrent access
 }
 
@@ -28,6 +34,9 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			u.signup(w, r)
 		} else if r.URL.Path == "/signin" {
 			u.signin(w, r)
+		} else {
+			w.WriteHeader(http.StatusAccepted)
+			w.Write([]byte(`{"message": "post called"}`))
 		}
 	case "PUT":
 		w.WriteHeader(http.StatusAccepted)
@@ -42,22 +51,38 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *userHandler) signup(w http.ResponseWriter, r *http.Request) {
-	userID := ""
-	pw := ""
-	// json body in an http request send json request using postman
-	// receive it in the server maybe unmarshal it into a struct
-	// deserialize json in golang ("encoding/json")
-
+	var u1 user
+	if err := json.NewDecoder(r.Body).Decode(&u1); err != nil {
+		fmt.Println(err)
+		internalServerError(w, r)
+		return
+	}
 	u.store.Lock()
-	u.store.users[userID] = pw
+	u.store.users[u1.UserID] = u1
 	u.store.Unlock()
-	r.SetBasicAuth(userID, pw)
+	jsonBytes, err := json.Marshal(u1)
+
+	if err != nil {
+		fmt.Println(err)
+		internalServerError(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonBytes)
+	w.Write([]byte("New account created!\n"))
+	r.SetBasicAuth(u1.UserID, u1.Password)
 	r.Header.Add("Content-Type", "application/json")
 	r.Close = true
+
+}
+
+func internalServerError(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusInternalServerError)
+	w.Write([]byte("internal server error"))
 }
 
 func (u *userHandler) isAuthorised(username, password string) bool {
-	pass := u.store.users[username]
+	pass := u.store.users[username].Password
 
 	return password == pass
 }
@@ -76,7 +101,6 @@ func (u *userHandler) signin(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("WWW-Authenticate", `Basic realm="Give username and password"`)
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"message": "Invalid username or password"}`))
-		fmt.Printf("%s %s", username, password)
 		return
 	}
 
@@ -88,13 +112,13 @@ func main() {
 	mux := http.NewServeMux()
 	userH := &userHandler{
 		store: &datastore{
-			users: map[string]string{
-				"test": "secret",
-				"bob":  "thebuilder123",
+			users: map[string]user{
+				"test": {UserID: "test", Password: "secret"},
 			},
 			RWMutex: &sync.RWMutex{},
 		},
 	}
+	mux.Handle("/", userH)
 	mux.Handle("/signin", userH)
 	mux.Handle("/signup", userH)
 	log.Fatal(http.ListenAndServe(":8080", mux))
