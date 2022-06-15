@@ -6,6 +6,9 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 type user struct {
@@ -23,17 +26,43 @@ type userHandler struct {
 	store *datastore
 }
 
+// users sessions
+var sessions = map[string]session{}
+
+// session contains the username and the time of expiration
+type session struct {
+	username string
+	expiry   time.Time
+}
+
+func (s session) isExpired() bool {
+	return s.expiry.Before(time.Now())
+}
+func (u *userHandler) listUsers(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("%+v", u.store.users)
+}
+
 func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
 	case "GET":
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"message": "get called"}`))
+		if r.URL.Path == "/welcome" {
+			u.welcome(w, r)
+		} else if r.URL.Path == "/users" {
+			u.listUsers(w, r)
+		} else {
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"message": "get called"}`))
+		}
 	case "POST":
 		if r.URL.Path == "/signup" {
 			u.signup(w, r)
 		} else if r.URL.Path == "/signin" {
 			u.signin(w, r)
+		} else if r.URL.Path == "/refresh" {
+			u.refresh(w, r)
+		} else if r.URL.Path == "logout" {
+			u.logout(w, r)
 		} else {
 			w.WriteHeader(http.StatusAccepted)
 			w.Write([]byte(`{"message": "post called"}`))
@@ -51,61 +80,160 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *userHandler) signup(w http.ResponseWriter, r *http.Request) {
-	var u1 user
-	if err := json.NewDecoder(r.Body).Decode(&u1); err != nil {
-		fmt.Println(err)
-		internalServerError(w, r)
+	var cred user
+	if err := json.NewDecoder(r.Body).Decode(&cred); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	u.store.Lock()
-	u.store.users[u1.UserID] = u1
+	u.store.users[cred.UserID] = cred
 	u.store.Unlock()
-	jsonBytes, err := json.Marshal(u1)
+	jsonBytes, err := json.Marshal(cred)
 
 	if err != nil {
-		fmt.Println(err)
-		internalServerError(w, r)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(jsonBytes)
 	w.Write([]byte("New account created!\n"))
-	r.SetBasicAuth(u1.UserID, u1.Password)
+	r.SetBasicAuth(cred.UserID, cred.Password)
 	r.Header.Add("Content-Type", "application/json")
 	r.Close = true
 
 }
 
-func internalServerError(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusInternalServerError)
-	w.Write([]byte("internal server error"))
-}
-
-func (u *userHandler) isAuthorised(username, password string) bool {
-	pass := u.store.users[username].Password
-
-	return password == pass
-}
-
 func (u *userHandler) signin(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "application/json")
-	username, password, ok := r.BasicAuth()
-	if !ok {
-		w.Header().Add("WWW-Authenticate", `Basic realm="Give username and password"`)
+	var creds user
+	err := json.NewDecoder(r.Body).Decode(&creds)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	expectedPassword := u.store.users[creds.UserID].Password
+	if expectedPassword != creds.Password {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"message": "No basic auth present"}`))
 		return
 	}
 
-	if !u.isAuthorised(username, password) {
-		w.Header().Add("WWW-Authenticate", `Basic realm="Give username and password"`)
+	// Create a new random session token
+	sessionToken := uuid.NewString()
+	expiresAt := time.Now().Add(120 * time.Second)
+
+	// Set the token in the session map
+	sessions[sessionToken] = session{
+		username: creds.UserID,
+		expiry:   expiresAt,
+	}
+
+	// set the client cookie as the session token we just created and set the expiration time to 2 minutes
+	http.SetCookie(w, &http.Cookie{
+		Name:    "session_token",
+		Value:   sessionToken,
+		Expires: expiresAt,
+	})
+}
+func (u *userHandler) welcome(w http.ResponseWriter, r *http.Request) {
+	// obtaining the session token from the request cookie
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			// return an unauthorized status if the cookie is not set
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// Return a bad request status for any other errors
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	sessionToken := c.Value
+
+	// Retreive the session from our session map
+	userSession, exists := sessions[sessionToken]
+	if !exists {
+		// Unauthorized error if the seesion token is not present
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"message": "Invalid username or password"}`))
+		return
+	}
+	// For expired sessions, delete token and return an unauthorized status
+	if userSession.isExpired() {
+		delete(sessions, sessionToken)
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "welcome to golang world!"}`))
+	// For valid sessions, return a welcome message
+	w.Write([]byte(fmt.Sprintf("Welcome %s!", userSession.username)))
+}
+
+func (u *userHandler) refresh(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	sessionToken := c.Value
+
+	userSession, exists := sessions[sessionToken]
+	if !exists {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	if userSession.isExpired() {
+		delete(sessions, sessionToken)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	// If the previous session is valid, create a new session token for the current user
+	newSessionToken := uuid.NewString()
+	expiresAt := time.Now().Add(120 * time.Second)
+
+	// Set the token in the session map, along with the user whom it represents
+	sessions[newSessionToken] = session{
+		username: userSession.username,
+		expiry:   expiresAt,
+	}
+
+	// Delete the old session token
+	delete(sessions, sessionToken)
+
+	// Set the new token as the users `session_token` cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:    "session_token",
+		Value:   newSessionToken,
+		Expires: time.Now().Add(120 * time.Second),
+	})
+}
+
+func (u *userHandler) logout(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			// If the cookie is not set, return an unauthorized status
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// For any other type of error, return a bad request status
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	sessionToken := c.Value
+
+	// remove the users session from the session map
+	delete(sessions, sessionToken)
+
+	// Cookie is expired
+	// Set the session token to an empty value and set its expiry as the current time
+	http.SetCookie(w, &http.Cookie{
+		Name:    "session_token",
+		Value:   "",
+		Expires: time.Now(),
+	})
 }
 
 func main() {
@@ -121,6 +249,10 @@ func main() {
 	mux.Handle("/", userH)
 	mux.Handle("/signin", userH)
 	mux.Handle("/signup", userH)
+	mux.Handle("/refresh", userH)
+	mux.Handle("/welcome", userH)
+	mux.Handle("/logout", userH)
+	mux.Handle("/users", userH)
 	log.Fatal(http.ListenAndServe(":8080", mux))
 
 }
