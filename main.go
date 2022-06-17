@@ -11,14 +11,32 @@ import (
 	"github.com/google/uuid"
 )
 
+/*
+{ "id": "f5 demo", "pw": "new account"}
+
+{ "id": "f5 demo", "subject": "I just made a new account", "content":"Let’s go"}
+
+{ "id": "test", "pw": "secret"}
+
+{ "id": "test", "subject": "testing", "content":"Does this work?"}
+
+*/
+
 type user struct {
 	UserID   string `json:"id"`
 	Password string `json:"pw"`
 }
 
+type message struct {
+	UserID  string `json:"id"`
+	Subject string `json:"subject"`
+	Content string `json:"content"`
+}
+
 // in-memory
 type datastore struct {
 	users         map[string]user
+	messages      map[string]message
 	*sync.RWMutex //concurrent access
 }
 
@@ -39,7 +57,7 @@ func (s session) isExpired() bool {
 	return s.expiry.Before(time.Now())
 }
 func (u *userHandler) listUsers(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("%+v", u.store.users)
+	w.Write([]byte(fmt.Sprintf("%+v", u.store.users)))
 }
 
 func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +68,8 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			u.welcome(w, r)
 		} else if r.URL.Path == "/users" {
 			u.listUsers(w, r)
+		} else if r.URL.Path == "/data" {
+			u.getMsg(w, r)
 		} else {
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte(`{"message": "get called"}`))
@@ -61,8 +81,10 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			u.signin(w, r)
 		} else if r.URL.Path == "/refresh" {
 			u.refresh(w, r)
-		} else if r.URL.Path == "logout" {
+		} else if r.URL.Path == "/logout" {
 			u.logout(w, r)
+		} else if r.URL.Path == "/data" {
+			u.sendMsg(w, r)
 		} else {
 			w.WriteHeader(http.StatusAccepted)
 			w.Write([]byte(`{"message": "post called"}`))
@@ -96,7 +118,7 @@ func (u *userHandler) signup(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(jsonBytes)
-	w.Write([]byte("New account created!\n"))
+	w.Write([]byte("\nNew account created!\n"))
 	r.SetBasicAuth(cred.UserID, cred.Password)
 	r.Header.Add("Content-Type", "application/json")
 	r.Close = true
@@ -118,7 +140,7 @@ func (u *userHandler) signin(w http.ResponseWriter, r *http.Request) {
 
 	// Create a new random session token
 	sessionToken := uuid.NewString()
-	expiresAt := time.Now().Add(120 * time.Second)
+	expiresAt := time.Now().Add(30 * time.Second)
 
 	// Set the token in the session map
 	sessions[sessionToken] = session{
@@ -140,10 +162,12 @@ func (u *userHandler) welcome(w http.ResponseWriter, r *http.Request) {
 		if err == http.ErrNoCookie {
 			// return an unauthorized status if the cookie is not set
 			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Your session has expired."))
 			return
 		}
 		// Return a bad request status for any other errors
 		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Bad request"))
 		return
 	}
 	sessionToken := c.Value
@@ -208,6 +232,7 @@ func (u *userHandler) refresh(w http.ResponseWriter, r *http.Request) {
 		Value:   newSessionToken,
 		Expires: time.Now().Add(120 * time.Second),
 	})
+	w.Write([]byte("Your session has been refreshed!"))
 }
 
 func (u *userHandler) logout(w http.ResponseWriter, r *http.Request) {
@@ -234,6 +259,58 @@ func (u *userHandler) logout(w http.ResponseWriter, r *http.Request) {
 		Value:   "",
 		Expires: time.Now(),
 	})
+	w.Write([]byte("Logged out succesfully. Goodbye!"))
+}
+
+func (u *userHandler) sendMsg(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Error: unauthorized."))
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Error: bad request."))
+		return
+	}
+	sessionToken := c.Value
+
+	userSession, exists := sessions[sessionToken]
+	if !exists {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	if userSession.isExpired() {
+		delete(sessions, sessionToken)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	//If the session is valid, users can send send a message
+	var post message
+	if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
+		fmt.Println("Here?")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	fmt.Printf("%+v\n", post)
+	u.store.Lock()
+	u.store.messages[post.UserID] = post
+	u.store.Unlock()
+	jsonBytes, err := json.Marshal(post)
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonBytes)
+	r.Header.Add("Content-Type", "application/json")
+	r.Close = true
+	w.Write([]byte("\nMessage received!"))
+}
+func (u *userHandler) getMsg(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte(fmt.Sprintf("%+v", u.store.messages)))
 }
 
 func main() {
@@ -243,7 +320,8 @@ func main() {
 			users: map[string]user{
 				"test": {UserID: "test", Password: "secret"},
 			},
-			RWMutex: &sync.RWMutex{},
+			messages: map[string]message{},
+			RWMutex:  &sync.RWMutex{},
 		},
 	}
 	mux.Handle("/", userH)
@@ -253,6 +331,7 @@ func main() {
 	mux.Handle("/welcome", userH)
 	mux.Handle("/logout", userH)
 	mux.Handle("/users", userH)
+	mux.Handle("/data", userH)
 	log.Fatal(http.ListenAndServe(":8080", mux))
 
 }
