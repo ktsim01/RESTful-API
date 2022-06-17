@@ -289,11 +289,9 @@ func (u *userHandler) sendMsg(w http.ResponseWriter, r *http.Request) {
 	//If the session is valid, users can send send a message
 	var post message
 	if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
-		fmt.Println("Here?")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("%+v\n", post)
 	u.store.Lock()
 	u.store.messages[post.UserID] = post
 	u.store.Unlock()
