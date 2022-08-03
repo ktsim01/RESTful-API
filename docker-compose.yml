@@ -1,20 +1,27 @@
-version: '3'
+version: '3.8'
 services:
-  app:
-    container_name: full_app
-    build: .
-    ports: 
-      - 8080:8080 
-    restart: on-failure
-    volumes:
-      - api:/usr/src/app/
-    networks:
-      - fullstack
-volumes:
-  api:
-  database_postgres:                  
+  backend:
+    container_name: restful_api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on: 
+      - serverdb
 
-# Networks to be created to facilitate communication between containers
-networks:
-  fullstack:
-    driver: bridge
+  serverdb:
+    container_name: serverdb
+    image: postgres:14.1-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=f5demo
+    ports:
+      - '5432:5432'
+    volumes: 
+      - serverdb:/var/lib/postgresql/data
+volumes:
+  serverdb:
+    driver: local

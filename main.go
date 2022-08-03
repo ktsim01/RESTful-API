@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	_ "github.com/lib/pq"
 )
 
 /*
@@ -22,7 +24,45 @@ import (
 
 */
 
-type user struct {
+/*
+CREATE TABLE users(
+    id SERIAL,
+    userID varchar(50) NOT NULL,
+    password varchar(50) NOT NULL,
+    PRIMARY KEY (id)
+)
+
+
+INSERT INTO users(
+	userID,
+	password
+)
+VALUES
+    ('id1', 'pw1'),
+    ('id2', 'pw2'),
+    ('id3', 'pw3');
+*/
+const (
+	DB_HOST     = "172.17.0.2"
+	DB_PORT     = 5432
+	DB_USER     = "postgres"
+	DB_PASSWORD = "f5demo"
+	DB_NAME     = "serverdb"
+)
+
+func setupDB() *sql.DB {
+	dbinfo := fmt.Sprintf("host=%s port=%d user=%s \npassword=%s dbname=%s sslmode=disable", DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME)
+	db, err := sql.Open("postgres", dbinfo)
+
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Success")
+
+	return db
+}
+
+type User struct {
 	UserID   string `json:"id"`
 	Password string `json:"pw"`
 }
@@ -33,15 +73,8 @@ type message struct {
 	Content string `json:"content"`
 }
 
-// in-memory
-type datastore struct {
-	users         map[string]user
-	messages      map[string]message
-	*sync.RWMutex //concurrent access
-}
-
 type userHandler struct {
-	store *datastore
+	DB *sql.DB
 }
 
 // users sessions
@@ -56,10 +89,6 @@ type session struct {
 func (s session) isExpired() bool {
 	return s.expiry.Before(time.Now())
 }
-func (u *userHandler) listUsers(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte(fmt.Sprintf("%+v", u.store.users)))
-}
-
 func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
@@ -67,7 +96,7 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/welcome" {
 			u.welcome(w, r)
 		} else if r.URL.Path == "/users" {
-			u.listUsers(w, r)
+			u.getUsers(w, r)
 		} else if r.URL.Path == "/data" {
 			u.getMsg(w, r)
 		} else {
@@ -101,15 +130,54 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (u *userHandler) getUsers(w http.ResponseWriter, r *http.Request) {
+	rows, err := u.DB.Query("SELECT * FROM users")
+	if err != nil {
+		log.Fatal(err)
+	}
+	var users []User
+
+	for rows.Next() {
+		var user User
+		rows.Scan(&user.UserID, &user.Password)
+		users = append(users, user)
+		fmt.Sprintf("%+v", user)
+	}
+	userBytes, _ := json.MarshalIndent(users, "", "\t")
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(userBytes)
+
+	defer rows.Close()
+
+}
+func (u *userHandler) getMsg(w http.ResponseWriter, r *http.Request) {
+
+	rows, err := u.DB.Query("SELECT * FROM messages")
+	if err != nil {
+		log.Fatal(err)
+	}
+	var messages []message
+
+	for rows.Next() {
+		var msg message
+		rows.Scan(&msg.UserID, &msg.Subject, &msg.Content)
+		messages = append(messages, msg)
+	}
+	userBytes, _ := json.MarshalIndent(messages, "", "\t")
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(userBytes)
+	defer rows.Close()
+}
+
 func (u *userHandler) signup(w http.ResponseWriter, r *http.Request) {
-	var cred user
+	var cred User
 	if err := json.NewDecoder(r.Body).Decode(&cred); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	u.store.Lock()
-	u.store.users[cred.UserID] = cred
-	u.store.Unlock()
+
+	statement := `INSERT INTO users(id,pw) VALUES ($1, $2)`
+	_, err := u.DB.Exec(statement, cred.UserID, cred.Password)
 	jsonBytes, err := json.Marshal(cred)
 
 	if err != nil {
@@ -126,14 +194,18 @@ func (u *userHandler) signup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *userHandler) signin(w http.ResponseWriter, r *http.Request) {
-	var creds user
+	var creds User
 	err := json.NewDecoder(r.Body).Decode(&creds)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	expectedPassword := u.store.users[creds.UserID].Password
-	if expectedPassword != creds.Password {
+	var id_found string
+	var pw_found string
+	var ctx context.Context
+	found := u.DB.QueryRowContext(ctx, "SELECT id, pw FROM users WHERE id=?", creds.UserID).Scan(&id_found, &pw_found)
+
+	if found == sql.ErrNoRows || found != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -292,9 +364,9 @@ func (u *userHandler) sendMsg(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	u.store.Lock()
-	u.store.messages[post.UserID] = post
-	u.store.Unlock()
+	// u.store.Lock()
+	// u.store.messages[post.UserID] = post
+	// u.store.Unlock()
 	jsonBytes, err := json.Marshal(post)
 
 	if err != nil {
@@ -307,21 +379,11 @@ func (u *userHandler) sendMsg(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	w.Write([]byte("\nMessage received!"))
 }
-func (u *userHandler) getMsg(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte(fmt.Sprintf("%+v", u.store.messages)))
-}
 
 func main() {
+	db := setupDB()
 	mux := http.NewServeMux()
-	userH := &userHandler{
-		store: &datastore{
-			users: map[string]user{
-				"test": {UserID: "test", Password: "secret"},
-			},
-			messages: map[string]message{},
-			RWMutex:  &sync.RWMutex{},
-		},
-	}
+	userH := &userHandler{DB: db}
 	mux.Handle("/", userH)
 	mux.Handle("/signin", userH)
 	mux.Handle("/signup", userH)

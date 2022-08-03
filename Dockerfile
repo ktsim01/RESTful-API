@@ -5,10 +5,6 @@ FROM golang:alpine
 # Set the current working directory inside the container 
 WORKDIR /app
 
-# Copy go mod and sum files 
-# COPY go.mod go.sum ./
-
-
 # Copy the source from the current directory to the working Directory inside the container 
 COPY . .
 
@@ -24,3 +20,7 @@ EXPOSE 8080
 #Command to run the executable
 CMD ["./main"]
 
+# To run docker
+# docker build -t test-container 
+# docker run --name newtest -d test-container
+# docker inspect newtest
