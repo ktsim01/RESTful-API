@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,23 +13,12 @@ import (
 )
 
 /*
-{ "id": "f5 demo", "pw": "new account"}
-
-{ "id": "f5 demo", "subject": "I just made a new account", "content":"Let’s go"}
-
-{ "id": "test", "pw": "secret"}
-
-{ "id": "test", "subject": "testing", "content":"Does this work?"}
-
-*/
-
-/*
 CREATE TABLE users(
     id SERIAL,
     userID varchar(50) NOT NULL,
     password varchar(50) NOT NULL,
     PRIMARY KEY (id)
-)
+);
 
 
 INSERT INTO users(
@@ -43,11 +31,11 @@ VALUES
     ('id3', 'pw3');
 */
 const (
-	DB_HOST     = "172.17.0.2"
+	DB_HOST     = "localhost"
 	DB_PORT     = 5432
 	DB_USER     = "postgres"
 	DB_PASSWORD = "f5demo"
-	DB_NAME     = "serverdb"
+	DB_NAME     = "postgres"
 )
 
 func setupDB() *sql.DB {
@@ -57,7 +45,6 @@ func setupDB() *sql.DB {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Success")
 
 	return db
 }
@@ -89,6 +76,7 @@ type session struct {
 func (s session) isExpired() bool {
 	return s.expiry.Before(time.Now())
 }
+
 func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
@@ -123,7 +111,11 @@ func (u *userHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"message": "put called"}`))
 	case "DELETE":
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "delete called"}`))
+		if r.URL.Path == "/delete" {
+			u.deleteAllUsers(w, r)
+		} else {
+			w.Write([]byte(`{"message": "delete called"}`))
+		}
 	default:
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(`{"message": "Kyutae's Awesome"}`))
@@ -138,10 +130,10 @@ func (u *userHandler) getUsers(w http.ResponseWriter, r *http.Request) {
 	var users []User
 
 	for rows.Next() {
+		var id int
 		var user User
-		rows.Scan(&user.UserID, &user.Password)
+		rows.Scan(&id, &user.UserID, &user.Password)
 		users = append(users, user)
-		fmt.Sprintf("%+v", user)
 	}
 	userBytes, _ := json.MarshalIndent(users, "", "\t")
 	w.Header().Set("Content-Type", "application/json")
@@ -159,8 +151,9 @@ func (u *userHandler) getMsg(w http.ResponseWriter, r *http.Request) {
 	var messages []message
 
 	for rows.Next() {
+		var id int
 		var msg message
-		rows.Scan(&msg.UserID, &msg.Subject, &msg.Content)
+		rows.Scan(&id, &msg.UserID, &msg.Subject, &msg.Content)
 		messages = append(messages, msg)
 	}
 	userBytes, _ := json.MarshalIndent(messages, "", "\t")
@@ -176,13 +169,18 @@ func (u *userHandler) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	statement := `INSERT INTO users(id,pw) VALUES ($1, $2)`
-	_, err := u.DB.Exec(statement, cred.UserID, cred.Password)
 	jsonBytes, err := json.Marshal(cred)
 
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+
+	var lastID int
+	err = u.DB.QueryRow("INSERT INTO users(userID,password) VALUES ($1, $2) returning id;", cred.UserID, cred.Password).Scan(&lastID)
+
+	if err != nil {
+		panic(err)
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(jsonBytes)
@@ -200,12 +198,12 @@ func (u *userHandler) signin(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	var id_found string
-	var pw_found string
-	var ctx context.Context
-	found := u.DB.QueryRowContext(ctx, "SELECT id, pw FROM users WHERE id=?", creds.UserID).Scan(&id_found, &pw_found)
+	var id int
+	var userID string
+	var pwfound string
+	found := u.DB.QueryRow("SELECT * FROM users WHERE userID ~* $1", creds.UserID).Scan(&id, &userID, &pwfound)
 
-	if found == sql.ErrNoRows || found != nil {
+	if found == sql.ErrNoRows || found != nil || pwfound != creds.Password {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -227,6 +225,17 @@ func (u *userHandler) signin(w http.ResponseWriter, r *http.Request) {
 		Expires: expiresAt,
 	})
 }
+
+func (u *userHandler) deleteAllUsers(w http.ResponseWriter, r *http.Request) {
+
+	_, err := u.DB.Exec("DELETE FROM users")
+
+	if err != nil {
+		panic(err)
+	}
+	w.Write([]byte("All users deleted successfully!"))
+}
+
 func (u *userHandler) welcome(w http.ResponseWriter, r *http.Request) {
 	// obtaining the session token from the request cookie
 	c, err := r.Cookie("session_token")
@@ -392,6 +401,7 @@ func main() {
 	mux.Handle("/logout", userH)
 	mux.Handle("/users", userH)
 	mux.Handle("/data", userH)
+	mux.Handle("/delete", userH)
 	log.Fatal(http.ListenAndServe(":8080", mux))
 
 }

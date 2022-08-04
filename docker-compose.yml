@@ -1,7 +1,8 @@
 version: '3.8'
+networks: 
+  apinetwork: {}
 services:
-  backend:
-    container_name: restful_api
+  restful_api:
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,9 +11,10 @@ services:
       - "8080:8080"
     depends_on: 
       - serverdb
+    networks:
+      - apinetwork
 
   serverdb:
-    container_name: serverdb
     image: postgres:14.1-alpine
     restart: always
     environment:
@@ -22,6 +24,8 @@ services:
       - '5432:5432'
     volumes: 
       - serverdb:/var/lib/postgresql/data
+    networks:
+      - apinetwork
 volumes:
   serverdb:
     driver: local
