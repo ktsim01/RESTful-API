@@ -20,6 +20,14 @@ CREATE TABLE users(
     PRIMARY KEY (id)
 );
 
+CREATE TABLE messages(
+    id SERIAL,
+    userID varchar(50) NOT NULL,
+    subject varchar(50) NOT NULL,
+	content varchar(50) NOT NULL,
+    PRIMARY KEY (id)
+);
+
 
 INSERT INTO users(
 	userID,
@@ -373,9 +381,13 @@ func (u *userHandler) sendMsg(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	// u.store.Lock()
-	// u.store.messages[post.UserID] = post
-	// u.store.Unlock()
+
+	var lastID int
+	err = u.DB.QueryRow("INSERT INTO messages(userID,subject,content) VALUES ($1, $2, $3) returning id;", post.UserID, post.Subject, post.Content).Scan(&lastID)
+
+	if err != nil {
+		panic(err)
+	}
 	jsonBytes, err := json.Marshal(post)
 
 	if err != nil {
